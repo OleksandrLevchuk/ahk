@@ -1,6 +1,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; COMPLETE TASKS
 ; get the time to reset every day
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; TO DO LIST
+; fix the app not saving upon exit
 ; make the "Rename project" button work
 ; make the app save upon exiting
 ; use A_TickCount to determine how accurate the time measurement is
@@ -46,7 +47,7 @@ else { ; settings aren't found
     }
     FileAppend objToStr(settings), INI_PATH
 }
-date := FormatTime('ddMMdd')
+date := FormatTime(,'yyMMdd')
 if not date == settings.date { ; the real date isn't the same as the stored one, which means it's a next day
     settings.pastDays.%settings.date% := Round( settings.time / 60 ) ; in minutes
     for name, project in settings.projects.OwnProps()
