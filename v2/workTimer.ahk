@@ -1,92 +1,116 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; COMPLETE TASKS
 ; get the time to reset every day
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; TO DO LIST
-; fix the app not saving upon exit
-; make the "Rename project" button work
+; make the exit button work
 ; make the app save upon exiting
-; use A_TickCount to determine how accurate the time measurement is
+; make the "Rename project" button work
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; NOT TESTED
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; TO DO LIST
+; make the progress color grey when inactive, lighter blue when active
+; fix the project time starting from negative zero
 ; make the app save periodically
-; allow user to reverse the progress bar
 ; fix the drag / button click bugging out sometimes
 ; fix menu separators when deleting all projects
-; make the exit button work
 ; make the minimize button work
+; allow user to reverse the progress bar
+; add subtasks ???
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; GLOBALS
 #NoTrayIcon
 CoordMode "Mouse", "Screen" ; make mouse coordinates absolute on the screen, instead of relative to "window"
 Array.Prototype.DefineProp('destruct', { Call: destruct }) ; allows [1,2,3].destruct(&one,&two,&three)
 INI_PATH := A_WorkingDir "\settings.ini" ; it's a constant :)
 WM_ON_DRAG := 0x201 ; window manager message when user starts dragging
-PROJECT_UPDATE_RATE := 60 ; how often project time gets updated. preferably 60 seconds
+OPT_VCENTER := 0x200 ; gui control center text vertically
 TIME_SPEED := 1 ; makes time this many times faster, keep it to 1 unless testing
 PROGRESS_REVERSED := true
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; LOAD SETTINGS
-if (FileExist(INI_PATH) and not GetKeyState('shift')) ; settings are found on disk
-    settings := strToObj(FileRead(INI_PATH)) ; load settings
-else { ; settings aren't found
-    settings := { ; so load in these default settings
+if (FileExist(INI_PATH) and not ( GetKeyState('shift') and GetKeyState('ctrl') and GetKeyState('alt'))) ; if settings are found on disk
+    settings := strToObj(FileRead(INI_PATH)) ; load them
+else { ; if settings aren't found ( or user holds SHIFT )
+    settings := { ; load in these default settings:
         date: 0,
         time: 0,
-        chunk: 540,
+        chunk: 54000,
         isRunning: false,
         project: "",
-        projectToday: 0,
-        projectTotal: 0,
         x: A_ScreenWidth / 2,
         y: A_ScreenHeight / 2,
-        w: 250,
-        h: 30,
+        projectsToday: {},
         projects: {
-            test_project_1: {
-                timeTotal: 0,
-                timeToday: 0
-            }
+            test_project_1: 0
         },
-        pastDays: {}
+        timeByDate: {},
     }
     FileAppend objToStr(settings), INI_PATH
 }
-date := FormatTime(,'yyMMdd')
+date := FormatTime(, 'yyMMdd')
 if not date == settings.date { ; the real date isn't the same as the stored one, which means it's a next day
-    settings.pastDays.%settings.date% := Round( settings.time / 60 ) ; in minutes
-    for name, project in settings.projects.OwnProps()
-        project.timeToday := 0
+    settings.timeByDate.%settings.date% := Round(settings.time / 60) ; save how much time you worked yesterday, convert from seconds to minutes
+    for name, time in settings.projectsToday.OwnProps() ; dump yesterday's work on each project into storage
+        settings.projects.%name% += Round(time / 60) ; convert from seconds to minutes
+    settings.projectsToday := {} ; clear up the projects list
     settings.date := date
     settings.time := 0
 }
+time := settings.time
+chunk := settings.chunk
+project := settings.project
+projectKey := StrReplace(project, ' ', '_')
+projectToday := project and settings.projectsToday.HasOwnProp(projectKey) ? settings.projectsToday.%projectKey% : 0
+projectTotal := project ? settings.projects.%projectKey% : 0
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;; MAIN WINDOW INTERFACE
-wtimer := Gui("+AlwaysOnTop +ToolWindow -Caption", "Work Timer")
-wtimer.SetFont('s9', 'Verdana')
+initUI() {
+    global wtimer := Gui("+AlwaysOnTop +ToolWindow -Caption", "Work Timer")
+    wtimer.SetFont('s8', 'Verdana')
+    h := 30, w := 300
+    global progress := wtimer.Add("Progress", "Smooth x0 y0 w" w - h " h" h " Range0-" chunk, chunk - Mod(time, chunk))
+    progress.OnEvent("ContextMenu", (*) => (wtimer.menu.Show()))
 
-wtimer.progressWidth := settings.w - settings.h
-wtimer.progress := wtimer.Add("Progress", "Smooth x0 y0 w" wtimer.progressWidth " h" settings.h " Range0-" settings.chunk, 0)
-wtimer.progress.OnEvent("ContextMenu", (*) => (wtimer.menu.Show()))
+    global textCtrl := wtimer.Add("Text", "center +BackgroundTrans x0 y0 w" w - h ' h' h)
+    textCtrl.update := project ? textCtrlUpdateWithProject : textCtrlUpdateShort
+    if not project
+        textCtrl.Opt(OPT_VCENTER)
+    textCtrl.update()
 
-wtimer.textCtrl := wtimer.Add("Text", "center +BackgroundTrans x0 y7 w" wtimer.progressWidth " h" settings.h)
-wtimer.startBtn := wtimer.Add("Button", "x" wtimer.progressWidth " y0 w" settings.h " h" settings.h, ">")
-wtimer.startBtn.OnEvent("Click", onClickStart)
-updateUI()
-wtimer.Show("w" settings.w " h" settings.h " x" settings.x " y" settings.y)
-
-onClickStart(*) {
-    settings.isRunning := not settings.isRunning
-    if settings.isRunning
-        timerStart()
-    else
-        timerPause()
+    wtimer.startBtn := wtimer.Add("Button", "x" w - h " y0 w" h " h" h, ">")
+    wtimer.startBtn.OnEvent("Click", onClickStart)
+    onClickStart(*) {
+        settings.isRunning := not settings.isRunning
+        if settings.isRunning
+            timerStart()
+        else
+            timerPause()
+    }
+    wtimer.Show("w" w " h" h " x" settings.x " y" settings.y)
 }
+initUI()
+
 if settings.isRunning
     timerStart()
 timerStart() {
     wtimer.startBtn.Text := "||"
-    SetTimer timerFunc, 1000 / TIME_SPEED
+    SetTimer timerFunction, 1000 / TIME_SPEED
 }
 timerPause() {
     wtimer.startBtn.Text := ">"
-    SetTimer timerFunc, 0
+    SetTimer timerFunction, 0
+}
+timerFunction() {
+    global time += 1
+    global projectToday += 1
+    progress.Value := chunk - Mod(time, chunk)
+    textCtrl.update()
+}
+textCtrlUpdateShort(*) {
+    textCtrl.Text := FormatSeconds(time)
+}
+textCtrlUpdateWithProject(*) {
+    t := projectToday / 3600
+    textCtrl.Text := FormatSeconds(time) "  `n"
+        . project ':  ' Round(t - 0.05, 1) "h today,  "
+        . Round(t - 0.05, 1) "h total"
 }
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; CONTEXT MENU
@@ -101,87 +125,111 @@ for v in menuItems
         wtimer.menu.Add(v, MenuHandler)
     else
         wtimer.menu.Add()
-if settings.project
-    wtimer.menu.Check(settings.project)
-else
+if project {
+    wtimer.menu.Check(project)
+} else {
     wtimer.menu.Disable('Remove project')
+}
 
 MenuHandler(item, *) {
-    switchProject(project) {
-        saveProject()
-        wtimer.menu.Check(project)
-        settings.project := project
-        project := StrReplace(project, ' ', '_') ; can't have spaces in key names
-        settings.projectToday := settings.projects.%project%.timeToday
-        settings.projectTotal := settings.projects.%project%.timeTotal
-        wtimer.menu.Enable('Remove project')
-        updateUI()
-    }
-    saveProject(project := settings.project) {
-        if not project
-            return
-        wtimer.menu.Uncheck(project)
-        settings.project := ""
-        project := StrReplace(project, ' ', '_') ; can't have spaces in key names
-        settings.projects.%project% := {
-            timeToday: Round(settings.projectToday), ; round, in case the project time updates more often than every minute
-            timeTotal: Round(settings.projectTotal)
-        }
+    deselectProject() {
+        global project := ""
         wtimer.menu.Disable('Remove project')
+        textCtrl.Opt(OPT_VCENTER)
+        textCtrl.update := textCtrlUpdateShort
+        textCtrl.update()
     }
-
+    switchProject(proj) {
+        if project { ; there was another project active before now
+            wtimer.menu.Uncheck(project) ; uncheck the previous project before switching
+            settings.projectsToday.%projectKey% := projectToday ; save the previous project
+        } else { ; there was no active project before
+            wtimer.menu.Enable 'Remove project' ; so the remove button was disabled
+            textCtrl.Opt('-' OPT_VCENTER)
+            textCtrl.update := textCtrlUpdateWithProject
+        }
+        global project := proj
+        global projectKey := StrReplace(project, ' ', '_') ; can't have spaces in key names
+        global projectToday := settings.projectsToday.HasOwnProp(projectKey) ? settings.projectsToday.%projectKey% : 0
+        wtimer.menu.Check(project)
+        wtimer.menu.Enable('Remove project')
+        textCtrl.update()
+    }
     if (item == "Reload") {
-        FileDelete(INI_PATH)
-        FileAppend(objToStr(settings), INI_PATH)
+        saveToDisk()
         Sleep(100)
         Reload()
     } else if (item == "Reset") {
         FileDelete(INI_PATH)
         Reload()
+    } else if item == "Minimize" {
+        MsgBox 'Fix me'
+    } else if item == 'Exit' {
+        ExitApp
     } else if (item == "Progress bar duration") {
         input := InputBox("Currently it's " Floor(settings.chunk / 60) " minutes", 'The time it takes for the bar to fill up')
         if not input.Result == 'OK' or not IsNumber(input.value)
             return
-        settings.chunk := input.Value * 60
-        wtimer.progress.Opt('Range0-' settings.chunk)
-        updateUI()
-    } else if (item == "Add project") {
-        obj := InputBox()
-        if ( not obj.Result == "OK") ; user aborted creating a new project
+        global chunk := input.Value * 60
+        progress.Opt('Range0-' chunk)
+        progress.Value := chunk - Mod(time, chunk)
+    } else if item == 'Add project' {
+        input := InputBox()
+        if not input.Value or not input.Result == "OK" ; user aborted creating a new project
             return ; so we stop too
-        project := Trim(obj.Value, ' ')
-        if not project
-            return
-        found := false
         for k, v in settings.projects.OwnProps() ; check the already existing projects
-            if (k == project) ; if such a project is found
-                found := true
-        if not found {
-            wtimer.menu.Add(project, MenuHandler)
-            settings.projects.%StrReplace(project, ' ', '_')% := { timeTotal: 0, timeToday: 0 }
-        }
-        switchProject(project)
-    } else if (item == "Rename project") {
-        MsgBox "FIX ME"
+            if k == input.value ; if such a project is found
+                return switchProject(input.value)
+
+        settings.projects.%StrReplace(input.Value, ' ', '_')% := 0
+        wtimer.menu.Add input.value, MenuHandler
+        switchProject(input.value)
+    } else if item == 'Rename project' {
+        input := InputBox()
+        if not input.Result == 'OK' or input.value == project
+            return ; user aborted renaming
+        for k, v in settings.projects.OwnProps()
+            if k == input.value
+                return MsgBox("such project already exists")
+        newProject := input.value
+        newKey := strreplace(newProject, ' ', '_')
+        settings.projects.%newKey% := settings.projects.%projectKey%
+        settings.projects.DeleteProp(projectKey)
+        settings.projectsToday.DeleteProp(projectKey)
+        wtimer.menu.rename(project, newProject)
+        global project := newProject
+        global projectKey := newKey
+        textCtrl.update()
     } else if (item == "Remove project") {
-        wtimer.menu.Disable('Remove project')
-        wtimer.menu.Delete(settings.project)
-        project := StrReplace(settings.project, ' ', '_')
-        settings.projects.DeleteProp(project)
-        settings.project := ""
-        updateUI()
+        wtimer.menu.Delete(project)
+        settings.projects.DeleteProp(projectKey)
+        settings.projectsToday.DeleteProp(projectKey)
+        deselectProject()
     } else { ; user clicked on a project
-        if item == settings.project {
-            saveProject()
-            updateUI()
+        if item == project { ; user clicked on an already active project, so deacivate
+            settings.projectsToday.%projectKey% := projectToday
+            wtimer.menu.Uncheck(project)
+            deselectProject()
         } else {
             switchProject(item)
         }
     }
 }
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;; GARBAGE
+saveToDisk(ExitReason := 0, ExitCode := 0) { ; OnExit functions must return non-zero to prevent exit.
+    settings.time := time
+    settings.chunk := chunk
+    settings.project := project
+    settings.projectsToday.%projectKey% := projectToday
+    FileDelete(INI_PATH)
+    FileAppend(objToStr(settings), INI_PATH)
+}
+OnExit(saveToDisk)
 OnMessage(WM_ON_DRAG, onDrag) ; enable dragging
-onDrag(*) {
+onDrag(wparam, lparam, msg, hwnd) {
+    ; tip( wparam ' ' lparam ' ' msg ' ' hwnd)
+    if not hwnd == progress.Hwnd
+        return
     drag := false
     MouseGetPos(&mx, &my)
     while GetKeyState('lbutton') {
@@ -201,38 +249,18 @@ onDrag(*) {
     settings.x := x
     settings.y := y
 }
-timerFunc() {
-    settings.time++
-    if not Mod(settings.time, PROJECT_UPDATE_RATE) {
-        settings.projectToday += PROJECT_UPDATE_RATE / 60
-        settings.projectTotal += PROJECT_UPDATE_RATE / 60
-    }
-    updateUI()
-}
-updateUI() {
-    if PROGRESS_REVERSED
-        wtimer.progress.Value := settings.chunk - Mod(settings.time, settings.chunk)
-    else
-        wtimer.progress.Value := Mod(settings.time, settings.chunk)
-    if not settings.project
-        wtimer.textCtrl.Text := FormatSeconds(settings.time)
-    else
-        wtimer.textCtrl.Text := FormatSeconds(settings.time) "  "
-            . Format("{1:0.1f}", settings.projectToday / 60) "h today  "
-            . Format("{1:0.1f}", settings.projectTotal / 60) "h total"
-}
+;;;;;;;;;;;;;;;;;;;;;;;;;;;; UTILITY
 FormatSeconds(NumberOfSeconds) {
     return NumberOfSeconds // 3600 ":" FormatTime(DateAdd(19990101, NumberOfSeconds, "Seconds"), "mm:ss")
 }
 concat(result, args*) {
-    loop args.Length {
+    loop args.length
         result := result . "  " . args[A_Index]
-    }
     return result
 }
 tip(words*) {
     ToolTip(concat(words*))
-    sleep 3000
+    sleep 1000
     ToolTip()
 }
 distance(x, y, x2, y2) {
@@ -258,8 +286,7 @@ destruct(thisArray, VarRefs*) {
         ++i
         if thisArray.Has(i) ; only assign if a value exists
             Rest[A_Index] := thisArray[i]
-        ; otherwise, it was undefined, so leave it undefined
-    }
+    } ; otherwise, it was undefined, so leave it undefined
     return Rest
 }
 StrRepeat(Str, Count) {
@@ -296,6 +323,8 @@ strToObj(str, &out := 0) {
             obj.%key% := strToObj(SubStr(str, InStr(str, '`n', , , A_Index)), &nLinesToSkip)
         else if val == "{}"
             obj.%key% := {}
+        else if key == '}{'
+            MsgBox 'the weird key ' key ' just happened'
         else
             obj.%key% := val
         ; MsgBox 'line ' A_Index ':  ' key '  ' val
